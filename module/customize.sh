@@ -35,7 +35,7 @@ if [ -f "$MODPATH/bin/nmload-$ARCH" ]; then
   mv "$MODPATH/bin/nmload-$ARCH" "$MODPATH/bin/nmload"
 fi
 set_perm "$MODPATH/bin/nmload" 0 0 0755
-rm -rf "$MODPATH"/bin/nm-* "$MODPATH"/bin/lkmloader-*
+rm -rf "$MODPATH"/bin/nm-* "$MODPATH"/bin/nmload-*
 
 load_ko() {
   local ko_path="$1"
