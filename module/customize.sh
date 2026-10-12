@@ -31,10 +31,10 @@ else
     ui_print "! Failed to create 'nm' symlink, skipping.."
 fi
 
-USE_ROOT_INSMOD=false
-
-mv "$MODPATH/bin/lkmloader-$ARCH" "$MODPATH/lkm/lkmloader"
-set_perm "$MODPATH/lkm/lkmloader" 0 0 0755
+if [ -f "$MODPATH/bin/nmload-$ARCH" ]; then
+  mv "$MODPATH/bin/nmload-$ARCH" "$MODPATH/bin/nmload"
+fi
+set_perm "$MODPATH/bin/nmload" 0 0 0755
 rm -rf "$MODPATH"/bin/nm-* "$MODPATH"/bin/lkmloader-*
 
 load_ko() {
@@ -42,28 +42,20 @@ load_ko() {
   local output
   local ret
 
-  if [ "$USE_ROOT_INSMOD" = true ] && [ "$MODULE_WAS_BUSY" = false ]; then
-    if "${ROOT_IMP}d" insmod "$ko_path" >/dev/null 2>&1 && "$MODPATH/bin/nm" version >/dev/null 2>&1; then
-      return 0
-    fi
-    ui_print "  [!] ${ROOT_IMP}d insmod failed; falling back to lkmloader."
-    rmmod nomount 2>/dev/null
-    USE_ROOT_INSMOD=false
-  fi
-
-  output=$("$MODPATH/lkm/lkmloader" "$ko_path" 2>&1)
+  output=$("$MODPATH/bin/nmload" "$ko_path" 2>&1)
   ret=$?
 
   if [ $ret -eq 0 ] && "$MODPATH/bin/nm" version >/dev/null 2>&1; then
     return 0
   fi
 
+  # On update the old driver may still be busy; "File exists" confirms compatibility.
   if [ "$MODULE_WAS_BUSY" = true ] && echo "$output" | grep -iq "File exists"; then
-    ui_print "  [~] lkmloader verified compatibility (Dry-run pass)."
+    ui_print "  [~] nmload verified compatibility (Dry-run pass)."
     return 0
   fi
 
-  ui_print "  [!] lkmloader output: $output"
+  ui_print "  [!] nmload output: $output"
   return 1
 }
 
@@ -108,15 +100,7 @@ if [ "$IS_BUILTIN" = true ]; then
   rm -rf "$MODPATH/lkm"
 else
   if [ "$MODULE_WAS_BUSY" = false ]; then
-    ui_print "  [*] Built-in support not found. Attempting LKM injection..."
-  fi
-
-  if command -v ksud >/dev/null 2>&1 && ksud -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then
-    USE_ROOT_INSMOD=true
-    ui_print "- KernelSU ksud insmod detected; lkmloader will remain as fallback."
-  elif command -v apd >/dev/null 2>&1 && apd -h 2>&1 | grep -qE '(^|[[:space:]])insmod([[:space:]]|$)'; then
-    USE_ROOT_INSMOD=true
-    ui_print "- APatch apd insmod detected; lkmloader will remain as fallback."
+    ui_print "  [*] Built-in support not found. Loading via nmload (KallRecon direct finit_module)..."
   fi
 
   EXACT_MATCH="$MODPATH/lkm/nomount-${AKVER}-${KVER}.ko"
@@ -167,9 +151,6 @@ else
 fi
 
 if [ "$NOMOUNT_LOADED" = true ]; then
-  if [ "$USE_KSUD" = true ] || [ "$IS_BUILTIN" = true ]; then
-    rm -f "$MODPATH/lkm/lkmloader" || true
-  fi
   ui_print "  [OK] System is ready for injection."
   if [ "$OLD_LKM_UNLOADED" = true ] || [ "$RESTORED_OLD_KO" = true ]; then
     if [ -f "$MODPATH/metamount.sh" ]; then
