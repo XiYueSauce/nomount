@@ -67,7 +67,7 @@ jobs:
           cd userspace/src
 
           zig cc -target aarch64-linux-musl -Oz -static -fno-unwind-tables -fno-ident nmload.c -o ../../bin/nmload-arm64
-          zig cc -target arm-linux-musl   -Oz -static -fno-unwind-tables -fno-ident nmload.c -o ../../bin/nmload-arm
+          zig cc -target arm-linux-musleabihf -Oz -static -fno-unwind-tables -fno-ident nmload.c -o ../../bin/nmload-arm
 
           cd ../../bin
           ../sstrip -z nmload-*
