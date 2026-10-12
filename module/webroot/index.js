@@ -35,6 +35,7 @@ const LOCALE_NAMES = {
     id: 'Bahasa Indonesia',
     zh: '简体中文',
     ru: 'Русский',
+    pl: 'Polski',
     tr: 'Türkçe',
     vi: 'Tiếng Việt',
     bn: 'বাংলা',
@@ -150,6 +151,7 @@ function renderLanguagePicker() {
 const MOD_DIR = "/data/adb/modules";
 const NM_DATA = "/data/adb/nomount";
 const NM_BIN = "/data/adb/modules/nomount/bin/nm";
+const RULE_PATHS = `${MOD_DIR}/nomount/rule-paths.sh`;
 const FILES = { disable: `${NM_DATA}/disable`, exclusions: `${NM_DATA}/.exclusion_list.json`, isolated: `${NM_DATA}/.block_isolated_uids`, theme: `${NM_DATA}/theme.json` };
 const APP_ICON_FALLBACK = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzgwODA4MCI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgMThjLTQuNDEgMC04LTMuNTktOC04czMuNTktOCA4LTggOCAzLjU5IDggOC0zLjU5IDgtOCA4eiIvPjwvc3ZnPg==";
 const viewLoadState = { 'view-home': false, 'view-modules': false, 'view-exclusions': false, 'view-options': false };
@@ -287,60 +289,197 @@ function hexToHSL(hex) {
     return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
 }
 
+const _PALETTE_ROLES = {
+    light: {
+        primary:                ['primary', 40, 0.85],
+        onPrimary:              ['primary', 90, 0.40],
+        primaryContainer:       ['primary', 90, 0.55],
+        onPrimaryContainer:     ['primary', 10, 0.75],
+        secondaryContainer:     ['secondary', 35, 0.50],
+        onSecondaryContainer:   ['secondary', 90, 0.45],
+        surface:                ['neutral', 98, 0.40],
+        background:             ['neutral', 92, 0.80],
+        surfaceContainer:       ['neutral', 88, 0.40],
+        surfaceContainerHigh:   ['neutral', 90, 0.50],
+        surfaceContainerHighest:['neutral', 94, 0.60],
+        onSurface:              ['neutral', 10, 0.80],
+        onSurfaceVariant:       ['neutralVariant', 30, 0.16],
+        outline:                ['neutralVariant', 50, 0.20],
+        error:                  ['error', 40, 0.85],
+        onError:                ['error', 100, 0.00],
+        errorContainer:         ['error', 90, 0.55],
+        onErrorContainer:       ['error', 10, 0.75],
+    },
+    dark: {
+        primary:                ['primary', 80, 0.55],
+        onPrimary:              ['primary', 20, 0.65],
+        primaryContainer:       ['primary', 30, 0.65],
+        onPrimaryContainer:     ['primary', 80, 0.45],
+
+        secondaryContainer:     ['secondary', 24, 0.50],
+        onSecondaryContainer:   ['secondary', 80, 0.30],
+
+        surface:                ['neutral', 10, 0.60],
+        background:             ['neutral', 6, 0.90],
+        surfaceContainer:       ['neutral', 12, 0.60],
+        surfaceContainerHigh:   ['neutral', 17, 0.60],
+        surfaceContainerHighest:['neutral', 22, 0.60],
+        onSurface:              ['neutral', 80, 0.06],
+        onSurfaceVariant:       ['neutralVariant', 80, 0.16],
+        outline:                ['neutralVariant', 60, 0.20],
+
+        error:                  ['error', 75, 0.95],
+        onError:                ['error', 20, 0.65],
+        errorContainer:         ['error', 50, 0.95],
+        onErrorContainer:       ['error', 60, 0.45],
+    },
+};
+
+_PALETTE_ROLES.amoled = Object.assign({}, _PALETTE_ROLES.dark, {
+    surface:                ['neutral', 4, 0.02],
+    background:             ['neutral', 4, 0.02],
+    surfaceContainer:       ['neutral', 8, 0.08],
+    surfaceContainerHigh:   ['neutral', 12, 0.12],
+    surfaceContainerHighest:['neutral', 16, 0.16],
+});
+
+const _PALETTE_HUES = {
+    primary:        0,
+    secondary:     -4,
+    neutral:        8,
+    neutralVariant: 8,
+    error:          4,
+};
+
+const hslToHex = (h, s, l) => {
+    l /= 100;
+    const a = s * Math.min(l, 1 - l) / 100;
+    const f = n => {
+        const k = (n + h / 30) % 12;
+        const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+        return Math.round(255 * color).toString(16).padStart(2, '0');
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+};
+
+function _tone(h, s, tone) {
+    const t = tone / 100;
+    const bell = Math.pow(Math.sin(Math.PI * t), 0.9);
+    const sat = Math.min(1, s * bell);
+    return hslToHex(h * 360, sat * 100, tone);
+}
+
+function computePalette(seedHex, scheme) {
+    const { h: seedH, s: seedS } = hexToHSL(seedHex);
+    const seedHue = seedH / 360;
+    const seedSat = seedS / 100;
+    const roles = _PALETTE_ROLES[scheme] || _PALETTE_ROLES.light;
+
+    const out = {};
+    for (const [role, [palette, tone, chroma]] of Object.entries(roles)) {
+        const h = (palette === 'error') ? _PALETTE_HUES.error / 360 : (seedHue + _PALETTE_HUES[palette] / 360 + 1) % 1;
+        const s = (palette === 'error') ? chroma : seedSat * chroma;
+        out['--md-sys-color-' + role.replace(/[A-Z]/g, c => '-' + c.toLowerCase())] =
+            _tone(h, s, tone);
+    }
+    return out;
+}
+
+let _nmSeed = null, _nmMqDark = null;
+function getSeedColor() {
+    if (!isMaterial) return customColor;
+    if (_nmSeed) return _nmSeed;
+    const v = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim();
+    _nmSeed = /^#[0-9a-f]{6}$/i.test(v) ? v : '#6750a4';
+    return _nmSeed;
+}
+
+function resolveScheme() {
+    if (activeTheme === 'light') return 'light';
+    if (activeTheme === 'dark')  return 'dark';
+    if (activeTheme === 'amoled') return 'amoled';
+    // 'system'
+    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 function applyAppearance() {
     const root = document.documentElement;
     root.setAttribute('data-theme', activeTheme);
     root.setAttribute('data-material', isMaterial);
 
-    if (!isMaterial) {
-        const { h, s, l } = hexToHSL(customColor);
-        root.style.setProperty('--nm-h', h);
-        root.style.setProperty('--nm-s', `${s}%`);
-        root.style.setProperty('--nm-l', `${l}%`);
+    const scheme = resolveScheme();
+    root.setAttribute('data-scheme', scheme);
+
+    const palette = computePalette(getSeedColor(), scheme);
+    for (const [name, value] of Object.entries(palette))
+        root.style.setProperty(name, value);
+
+    if (!isMaterial)
         root.style.setProperty('--nm-custom-color', customColor);
-    } else {
-        root.style.removeProperty('--nm-h');
-        root.style.removeProperty('--nm-s');
-        root.style.removeProperty('--nm-l');
+    else
         root.style.removeProperty('--nm-custom-color');
+
+    if (!_nmMqDark) {
+        _nmMqDark = matchMedia('(prefers-color-scheme: dark)');
+        _nmMqDark.addEventListener('change', () => {
+            if (activeTheme === 'system') {
+                _nmSeed = null;
+                applyAppearance();
+            }
+        });
     }
 }
 // Apply immediately to prevent flashes
 applyAppearance();
 
+let nmThemeDirty = false;
 async function syncThemeToDisk() {
+    nmThemeDirty = true;
     const config = { theme: activeTheme, material: isMaterial, color: customColor };
     const jsonStr = JSON.stringify(config);
     const b64 = btoa(unescape(encodeURIComponent(jsonStr)));
     await exec(`mkdir -p ${NM_DATA} && echo "${b64}" | base64 -d > ${FILES.theme}.tmp && mv -f ${FILES.theme}.tmp ${FILES.theme}`);
-    localStorage.setItem('nm_theme_synced', 'true');
 }
 
 async function restoreThemeFromDisk() {
-    if (localStorage.getItem('nm_theme_synced') === 'true') return;
-
     try {
         const { stdout, errno } = await exec(`cat ${FILES.theme} 2>/dev/null`);
-        if (errno === 0 && stdout) {
-            const config = JSON.parse(stdout.trim());
-            let changed = false;
-            if (config.theme && config.theme !== activeTheme) { 
-                activeTheme = config.theme; localStorage.setItem('nm_theme', activeTheme); changed = true; 
-            }
-            if (config.material !== undefined && config.material !== isMaterial) { 
-                isMaterial = config.material; localStorage.setItem('nm_material', isMaterial); changed = true; 
-            }
-            if (config.color && config.color !== customColor) { 
-                customColor = config.color; localStorage.setItem('nm_custom_color', customColor); changed = true; 
-            }
-            if (changed) applyAppearance();
-        }
+        if (errno !== 0 || !stdout) return;
 
-        localStorage.setItem('nm_theme_synced', 'true');
-    } catch (e) { 
-        console.warn("No saved theme config found on disk.");
-        localStorage.setItem('nm_theme_synced', 'true');
-    }
+        let config;
+        try { config = JSON.parse(stdout.trim()); } catch { return; }
+
+        if (nmThemeDirty) return;
+
+        const diskTheme = (config.theme && config.theme in THEME_NAMES) ? config.theme : activeTheme;
+        const diskMaterial = config.material !== undefined ? Boolean(config.material) : isMaterial;
+        const diskColor = (typeof config.color === 'string' && /^#[0-9a-f]{6}$/i.test(config.color)) ? config.color : customColor;
+
+        if (diskTheme === activeTheme && diskMaterial === isMaterial && diskColor === customColor) return;
+
+        activeTheme = diskTheme;
+        isMaterial = diskMaterial;
+        customColor = diskColor;
+        localStorage.setItem('nm_theme', activeTheme);
+        localStorage.setItem('nm_material', isMaterial);
+        localStorage.setItem('nm_custom_color', customColor);
+
+        applyAppearance();
+        if (document.getElementById('theme-select-menu')) renderThemePicker();
+
+        const swMat = document.querySelector('#setting-material input');
+        const customColCard = document.getElementById('custom-color-card');
+        const colorIndicator = document.getElementById('custom-color-indicator');
+        const matCard = swMat?.closest('.segment-card');
+
+        if (swMat) swMat.checked = isMaterial;
+        if (customColCard) customColCard.style.display = isMaterial ? 'none' : '';
+        if (colorIndicator) colorIndicator.style.backgroundColor = customColor;
+        if (matCard) {
+            matCard.style.borderEndStartRadius = isMaterial ? 'var(--nm-segment-outer-corner)' : '';
+            matCard.style.borderEndEndRadius = isMaterial ? 'var(--nm-segment-outer-corner)' : '';
+        }
+    } catch (e) {}
 }
 
 const homeUI = {};
@@ -364,31 +503,37 @@ const UI = {};
 let currentActiveViewId = 'view-home';
 let currentActiveViewTitle = '';
 
-let currentHistoryLevel = 0;
-history.replaceState({ level: 0 }, '');
+let nmHistory = { level: 0, dialog: null, depth: 0 };
+history.replaceState(nmHistory, '');
+
+const nmDialogClosers = { presets: null, advanced: null };
+function nmPush(state) {
+    nmHistory = { level: state.level, dialog: state.dialog ?? null, depth: nmHistory.depth + 1 };
+    history.pushState(nmHistory, '');
+}
+function nmReplace(state) {
+    nmHistory = { level: state.level, dialog: state.dialog ?? null, depth: nmHistory.depth };
+    history.replaceState(nmHistory, '');
+}
 
 window.addEventListener('popstate', (e) => {
-    const level = e.state ? e.state.level : 0;
+    const prev = nmHistory;
+    const next = e.state || { level: 0, dialog: null, depth: 0 };
 
-    if (currentHistoryLevel === 3 && level < 3) {
-        currentHistoryLevel = level;
-        const uidModal = document.getElementById('uid-input-modal');
-        const cancelBtn = document.getElementById('btn-cancel-uid');
-        if (uidModal && uidModal.classList.contains('active') && cancelBtn) cancelBtn.click();
+    if (prev.dialog === 'advancedColor' && next.dialog !== 'advancedColor')
+        nmDialogClosers.advanced?.();
+    if (prev.dialog === 'colorPresets' && next.dialog !== 'colorPresets')
+        nmDialogClosers.presets?.();
+    if (prev.level === 3 && next.level < 3)
+        closeUidModalFromHistory();
+    if (prev.level === 2 && next.level < 2) {
+        closeAppSelector(true);
+        exitMultiSelectMode();
     }
-
-    if (currentHistoryLevel === 2 && level < 2) {
-        currentHistoryLevel = level;
-        if (typeof closeAppSelector === 'function') closeAppSelector(true);
-        if (typeof exitMultiSelectMode === 'function') exitMultiSelectMode();
-    }
-
-    if (currentHistoryLevel >= 1 && level === 0) {
-        currentHistoryLevel = level;
+    if (prev.level >= 1 && next.level === 0)
         switchToTab('view-home', false);
-    }
 
-    currentHistoryLevel = level;
+    nmHistory = next;
 });
 
 function switchToTab(target, pushToHistory = true) {
@@ -417,11 +562,10 @@ function switchToTab(target, pushToHistory = true) {
 
     if (pushToHistory) {
         if (target === 'view-home') {
-            if (currentHistoryLevel === 1) { history.back(); currentHistoryLevel = 0; } 
-            else if (currentHistoryLevel > 1) { history.go(-currentHistoryLevel); currentHistoryLevel = 0; }
+            if (nmHistory.depth > 0) history.go(-nmHistory.depth);
         } else {
-            if (currentHistoryLevel === 0) { history.pushState({ level: 1 }, ''); currentHistoryLevel = 1; } 
-            else if (currentHistoryLevel === 1) { history.replaceState({ level: 1 }, ''); }
+            if (nmHistory.level === 0) nmPush({ level: 1 });
+            else nmReplace({ level: 1 });
         }
     }
 
@@ -652,34 +796,9 @@ async function loadModule(modId) {
         valid_dirs=""
         for p in ${TARGET_PARTITIONS}; do [ -d "$p" ] && { [ -d "/$p" ] || [ -d "/system/$p" ]; } && valid_dirs="$valid_dirs $p"; done
         [ -z "$valid_dirs" ] && exit 0
-        find -L $valid_dirs \\( -type d -o -type c -o -name ".replace" \\) -exec sh -c '
-            for f do
-                v="$f"
-                case "$v" in system/*)
-                    p="\${v#system/}"; p="\${p%%/*}"
-                    case "$p" in vendor|system_ext|product|odm|apex|oem|optics|prism|mi_ext|my_*) v="$p\${v#system/$p}" ;; esac
-                ;; esac
-                if [ -d "$f" ]; then
-                    getfattr -n trusted.overlay.opaque "$f" 2>/dev/null | grep -q "=\\"y\\"" && printf "/%s\\0" "$v"
-                elif [ "\${f##*/}" = ".replace" ]; then
-                    printf "/%s\\0" "\${v%/.replace}"
-                else
-                    printf "/%s\\0" "$v"
-                fi
-            done
-        ' _ {} + 2>/dev/null | xargs -0 -r -n 200 ${NM_BIN} rule add --whiteout
+        find -L $valid_dirs \\( -type d -o -type c -o -name ".replace" \\) -exec sh "${RULE_PATHS}" path "${modPath}" {} + 2>/dev/null | xargs -0 -r -n 200 ${NM_BIN} rule add --whiteout
 
-        find -L $valid_dirs  \\( -type f -o -type l \\) ! -name ".replace" -exec sh -c '
-            mod="$1"; shift
-            for f do
-                v="$f"
-                case "$v" in system/*)
-                    p="\${v#system/}"; p="\${p%%/*}"
-                    case "$p" in vendor|system_ext|product|odm|apex|oem|optics|prism|mi_ext|my_*) v="$p\${v#system/$p}" ;; esac
-                ;; esac
-                printf "/%s\\0%s/%s\\0" "$v" "$mod" "$f"
-            done
-        ' _ "${modPath}" {} + 2>/dev/null | xargs -0 -r -n 200 ${NM_BIN} rule add
+        find -L $valid_dirs  \\( -type f -o -type l \\) ! -name ".replace" -exec sh "${RULE_PATHS}" pair "${modPath}" {} + 2>/dev/null | xargs -0 -r -n 200 ${NM_BIN} rule add
     `;
     try { await exec(script); } catch (e) { throw e; }
 }
@@ -691,22 +810,7 @@ async function unloadModule(modId) {
         valid_dirs=""
         for p in ${TARGET_PARTITIONS}; do [ -d "$p" ] && { [ -d "/$p" ] || [ -d "/system/$p" ]; } && valid_dirs="$valid_dirs $p"; done
         [ -z "$valid_dirs" ] && exit 0
-        find -L $valid_dirs \\( -type f -o -type l -o -type c -o -type d \\) -exec sh -c '
-            for f do
-                v="$f"
-                case "$v" in system/*)
-                    p="\${v#system/}"; p="\${p%%/*}"
-                    case "$p" in vendor|system_ext|product|odm|apex|oem|optics|prism|mi_ext|my_*) v="$p\${v#system/$p}" ;; esac
-                ;; esac
-                if [ -d "$f" ]; then
-                    getfattr -n trusted.overlay.opaque "$f" 2>/dev/null | grep -q "=\\"y\\"" && printf "/%s\\0" "$v"
-                elif [ "\${f##*/}" = ".replace" ]; then
-                    printf "/%s\\0" "\${v%/.replace}"
-                else
-                    printf "/%s\\0" "$v"
-                fi
-            done
-        ' _ {} + 2>/dev/null | xargs -0 -r -n 200 ${NM_BIN} rule del
+        find -L $valid_dirs \\( -type f -o -type l -o -type c -o -type d \\) -exec sh "${RULE_PATHS}" path "${modPath}" {} + 2>/dev/null | xargs -0 -r -n 200 ${NM_BIN} rule del
     `;
     try { await exec(script); } catch (e) { throw e; }
 }
@@ -901,11 +1005,7 @@ function closeAppSelector(fromHistory = false) {
     content?.style.removeProperty('--app-selector-top');
     content?.style.removeProperty('--app-selector-height');
     if (listObserver) listObserver.disconnect();
-
-    if (!fromHistory && currentHistoryLevel >= 2) {
-        history.back();
-        currentHistoryLevel = 1;
-    }
+    if (!fromHistory && nmHistory.level >= 2) history.back();
 }
 
 function openAppSelector() {
@@ -924,11 +1024,7 @@ function openAppSelector() {
     content.classList.add('viewport-locked');
     modal.classList.add('active');
 
-    if (currentHistoryLevel < 2) {
-        history.pushState({ level: 2 }, '');
-        currentHistoryLevel = 2;
-    }
-
+    if (nmHistory.level < 2) nmPush({ level: 2 });
     if (listObserver) listObserver.disconnect();
     document.getElementById('filter-menu').classList.remove('active'); 
     searchInput.value = '';
@@ -1037,17 +1133,6 @@ async function addExclusion(uid, label, pkg) {
 
     await loadExclusions();
 }
-
-const hslToHex = (h, s, l) => {
-    l /= 100;
-    const a = s * Math.min(l, 1 - l) / 100;
-    const f = n => {
-        const k = (n + h / 30) % 12;
-        const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
-        return Math.round(255 * color).toString(16).padStart(2, '0');
-    };
-    return `#${f(0)}${f(8)}${f(4)}`;
-};
 
 // Options
 let optionsInitialized = false;
@@ -1207,27 +1292,31 @@ function initOptionsUI() {
             renderPresets();
         };
 
-        window.addEventListener('popstate', (e) => {
-            if (isAdvOpen && (!e.state || e.state.dialog !== 'advancedColor')) {
-                dialogAdv.classList.remove('show');
-                isAdvOpen = false;
-                customColor = originalColor;
-                applyAppearance();
-                renderPresets();
-            }
-            if (!e.state || e.state.dialog !== 'colorPresets') {
-                dialogPresets.classList.remove('show');
-            }
-        });
+
+        nmDialogClosers.presets = () => { dialogPresets.classList.remove('show'); };
+        nmDialogClosers.advanced = () => {
+            if (!isAdvOpen) return;
+            dialogAdv.classList.remove('show');
+            isAdvOpen = false;
+            customColor = originalColor;
+            applyAppearance();
+            renderPresets();
+        };
+
+        customColCard.onclick = () => {
+            originalColor = customColor;
+            nmPush({ level: 1, dialog: 'colorPresets' });
+            dialogPresets.classList.add('show');
+            renderPresets();
+        };
 
         document.getElementById('btn-color-presets-close').onclick = () => history.back();
         document.getElementById('btn-adv-color-open').onclick = () => {
             isAdvOpen = true;
-            history.pushState({ dialog: 'advancedColor' }, '');
+            nmPush({ level: 1, dialog: 'advancedColor' });
             dialogAdv.classList.add('show');
             initAdvancedPicker();
         };
-
         document.getElementById('btn-adv-color-cancel').onclick = () => history.back();
         document.getElementById('btn-adv-color-accept').onclick = () => {
             originalColor = customColor;
@@ -1371,6 +1460,39 @@ async function refreshCurrentView() {
     else if (id === 'view-modules') await loadModules();
     else if (id === 'view-exclusions') await loadExclusions();
     else if (id === 'view-options') await loadOptions();
+}
+
+let nmUidModalResolver = null;
+let nmUidModalPendingValue = null;
+
+function closeUidModalFromHistory() {
+    const modal = document.getElementById('uid-input-modal');
+    if (!modal?.classList.contains('active')) return;
+    modal.classList.remove('active');
+    document.getElementById('manual-uid-input')?.blur();
+    const resolve = nmUidModalResolver;
+    const value = nmUidModalPendingValue;
+    nmUidModalResolver = null;
+    nmUidModalPendingValue = null;
+    resolve?.(value);
+}
+
+function getManualUid() {
+    return new Promise(resolve => {
+        nmUidModalResolver = resolve;
+        nmUidModalPendingValue = null;
+        const modalDialog = document.getElementById('uid-input-modal');
+        const input = document.getElementById('manual-uid-input');
+        const btnCancel = document.getElementById('btn-cancel-uid');
+        const btnAdd = document.getElementById('btn-confirm-uid');
+        modalDialog.classList.add('active');
+        input.value = '';
+        setTimeout(() => input.focus(), 150);
+        nmPush({ level: 3 });
+        btnCancel.onclick = () => history.back();
+        btnAdd.onclick = () => { nmUidModalPendingValue = input.value; history.back(); };
+        modalDialog.onclick = (e) => { if (e.target === modalDialog) history.back(); };
+    });
 }
 
 function initDelegationAndAttach() {
@@ -1571,36 +1693,6 @@ function initDelegationAndAttach() {
                 await loadExclusions();
             }
         } else {
-            const getManualUid = () => new Promise(resolve => {
-                const modalDialog = document.getElementById('uid-input-modal');
-                const input = document.getElementById('manual-uid-input');
-                const btnCancel = document.getElementById('btn-cancel-uid');
-                const btnAdd = document.getElementById('btn-confirm-uid');
-                modalDialog.classList.add('active');
-
-                const wasLevel = currentHistoryLevel;
-                history.pushState({ level: 3 }, '');
-                currentHistoryLevel = 3;
-
-                input.value = '';
-                setTimeout(() => input.focus(), 150);
-                const cleanup = () => {
-                    modalDialog.classList.remove('active');
-                    input.blur();
-                    btnCancel.onclick = null;
-                    btnAdd.onclick = null;
-                    modalDialog.onclick = null;
-
-                    if (currentHistoryLevel === 3) {
-                        history.back();
-                        currentHistoryLevel = wasLevel;
-                    }
-                };
-                btnCancel.onclick = () => { cleanup(); resolve(null); };
-                btnAdd.onclick = () => { cleanup(); resolve(input.value); };
-                modalDialog.onclick = (e) => {  if (e.target === modalDialog) { cleanup(); resolve(null); }  };
-            });
-
             const manualUid = await getManualUid();
             if (manualUid && /^\d+$/.test(manualUid.trim())) {
                 closeAppSelector();
